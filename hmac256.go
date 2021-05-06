@@ -49,13 +49,13 @@ func NewHmac256(secret string, user *User, _logger *log.Logger) *hmac256 {
 
 func (h *hmac256) Decode(token string) (*User, error) {
 
-	var i int8
+	var i int
 	var indexes = make([]int, 2, 2)
 
 	for index, t := range token {
 		if t == 46 {
 
-			if i > 2 {
+			if len(indexes) < i {
 				logger.Println(invalidSignature.Error())
 				return nil, invalidSignature
 			}
