@@ -104,6 +104,7 @@ func (h *hmac256) Encode() string {
 	_head, _err := json.Marshal(Head)
 
 	if _err != nil {
+		logger.Println(_err.Error())
 		return ""
 	}
 
@@ -112,6 +113,7 @@ func (h *hmac256) Encode() string {
 	_payload, _err := json.Marshal(h.User)
 
 	if _err != nil {
+		logger.Println(_err.Error())
 		return ""
 	}
 
@@ -119,7 +121,7 @@ func (h *hmac256) Encode() string {
 	_stringPayload := base64.StdEncoding.EncodeToString(_payload)
 	_signature := _stringHead + _stringPayload
 
-	sum := h.Sum([]byte(_signature))
+	sum := h.Sum(*(*[]byte)(unsafe.Pointer(&_signature)))
 	bb := base64.StdEncoding.EncodeToString(sum)
 	return _stringHead + "." + _stringPayload + "." + bb
 }
