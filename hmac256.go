@@ -55,7 +55,7 @@ func (h *hmac256) Decode(token string) (*User, error) {
 	for index, t := range token {
 		if t == 46 {
 
-			if len(indexes) < i {
+			if len(indexes) <= i {
 				logger.Println(invalidSignature.Error())
 				return nil, invalidSignature
 			}
