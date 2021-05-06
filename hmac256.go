@@ -5,11 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"hash"
 	"time"
 	"unsafe"
 )
+
+var invalidSignature = errors.New("invalid signature")
+var tokenExpired = errors.New("token expired")
 
 var sha = sha256.New
 
@@ -25,22 +28,24 @@ var Head = &head{
 
 type hmac256 struct {
 	hash.Hash
-	User IUser
+	User User
 }
 
-type IUser interface {
-	Expired() time.Duration
+type User struct {
+	Id      int    `json:"id"`
+	Login   string `json:"login"`
+	Expired time.Duration
 }
 
-func NewHmac256(secret string, user IUser) *hmac256 {
+func NewHmac256(secret string, user *User) *hmac256 {
 	h := hmac.New(sha, *(*[]byte)(unsafe.Pointer(&secret)))
 	return &hmac256{
 		h,
-		user,
+		*user,
 	}
 }
 
-func (h *hmac256) Decode(token string) IUser {
+func (h *hmac256) Decode(token string) (*User, error) {
 
 	var i int8
 	var indexes = make([]int, 2, 2)
@@ -49,7 +54,7 @@ func (h *hmac256) Decode(token string) IUser {
 		if t == 46 {
 
 			if i > 2 {
-				return nil
+				return nil, invalidSignature
 			}
 
 			indexes[i] = index
@@ -58,7 +63,7 @@ func (h *hmac256) Decode(token string) IUser {
 	}
 
 	if i != 2 {
-		return nil
+		return nil, invalidSignature
 	}
 
 	_head := token[0:indexes[0]]
@@ -66,15 +71,25 @@ func (h *hmac256) Decode(token string) IUser {
 	_signature := _head + _payload
 	_hasSignature := token[indexes[1]+1:]
 
-	if !h.ValidMAC(*(*[]byte)(unsafe.Pointer(&_signature)), *(*[]byte)(unsafe.Pointer(&_hasSignature))) {
-		return nil
+	if ok, _ := h.Valid(*(*[]byte)(unsafe.Pointer(&_signature)), *(*[]byte)(unsafe.Pointer(&_hasSignature))); !ok {
+		return nil, invalidSignature
 	}
 
 	usr, err := base64.StdEncoding.DecodeString(_payload)
 
-	err = json.Unmarshal(usr, h.User)
-	fmt.Println(err)
-	return h.User
+	err = json.Unmarshal(usr, &h.User)
+
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+
+	if now.Unix() > int64(h.User.Expired) {
+		return nil, tokenExpired
+	}
+
+	return &h.User, nil
 }
 
 func (h *hmac256) Encode() string {
@@ -85,6 +100,8 @@ func (h *hmac256) Encode() string {
 		return ""
 	}
 
+	exp := time.Now().Add(h.User.Expired * time.Minute).Unix()
+	h.User.Expired = time.Duration(exp)
 	_payload, _err := json.Marshal(h.User)
 
 	if _err != nil {
@@ -100,10 +117,7 @@ func (h *hmac256) Encode() string {
 	return _stringHead + "." + _stringPayload + "." + bb
 }
 
-func (h *hmac256) ValidMAC(message, messageMAC []byte) bool {
-	b, err := base64.StdEncoding.DecodeString(*(*string)(unsafe.Pointer(&messageMAC)))
-
-	fmt.Println(err)
-
-	return hmac.Equal(h.Sum(message), b)
+func (h *hmac256) Valid(message, messageMAC []byte) (bool, error) {
+	result, err := base64.StdEncoding.DecodeString(*(*string)(unsafe.Pointer(&messageMAC)))
+	return hmac.Equal(h.Sum(message), result), err
 }
