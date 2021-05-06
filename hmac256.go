@@ -7,13 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"hash"
+	"log"
 	"time"
 	"unsafe"
 )
 
 var invalidSignature = errors.New("invalid signature")
 var tokenExpired = errors.New("token expired")
-
+var logger *log.Logger
 var sha = sha256.New
 
 type head struct {
@@ -37,7 +38,8 @@ type User struct {
 	Expired time.Duration
 }
 
-func NewHmac256(secret string, user *User) *hmac256 {
+func NewHmac256(secret string, user *User, _logger *log.Logger) *hmac256 {
+	logger = _logger
 	h := hmac.New(sha, *(*[]byte)(unsafe.Pointer(&secret)))
 	return &hmac256{
 		h,
@@ -54,6 +56,7 @@ func (h *hmac256) Decode(token string) (*User, error) {
 		if t == 46 {
 
 			if i > 2 {
+				logger.Println(invalidSignature.Error())
 				return nil, invalidSignature
 			}
 
@@ -63,6 +66,7 @@ func (h *hmac256) Decode(token string) (*User, error) {
 	}
 
 	if i != 2 {
+		logger.Println(invalidSignature.Error())
 		return nil, invalidSignature
 	}
 
@@ -72,6 +76,7 @@ func (h *hmac256) Decode(token string) (*User, error) {
 	_hasSignature := token[indexes[1]+1:]
 
 	if ok, _ := h.Valid(*(*[]byte)(unsafe.Pointer(&_signature)), *(*[]byte)(unsafe.Pointer(&_hasSignature))); !ok {
+		logger.Println(invalidSignature.Error())
 		return nil, invalidSignature
 	}
 
@@ -80,12 +85,14 @@ func (h *hmac256) Decode(token string) (*User, error) {
 	err = json.Unmarshal(usr, &h.User)
 
 	if err != nil {
+		logger.Println(err.Error())
 		return nil, err
 	}
 
 	now := time.Now()
 
 	if now.Unix() > int64(h.User.Expired) {
+		logger.Println(tokenExpired.Error())
 		return nil, tokenExpired
 	}
 
