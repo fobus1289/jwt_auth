@@ -8,8 +8,8 @@ import (
 	"errors"
 	"hash"
 	"log"
+	"os"
 	"time"
-	"unsafe"
 )
 
 var invalidSignature = errors.New("invalid signature")
@@ -18,14 +18,29 @@ var logger *log.Logger
 var sha = sha256.New
 
 type head struct {
-	Alg  string
-	Type string
+	Alg        string
+	Type       string
+	HeadString []byte `json:"-"`
 }
 
-var Head = &head{
+func (h *head) toJson() *head {
+	_head, _err := json.Marshal(h)
+
+	if _err != nil {
+		logger.Println(_err.Error())
+		return nil
+	}
+	h.HeadString = _head
+	return h
+}
+
+var ifNotLogger = log.New(os.Stdout, "WARNING: ", log.Ltime|log.Lshortfile)
+
+var Head = (&head{
 	"HS256",
 	"JWT",
-}
+	nil,
+}).toJson()
 
 type hmac256 struct {
 	hash.Hash
@@ -39,16 +54,22 @@ type User struct {
 }
 
 func NewHmac256(secret string, user *User, _logger *log.Logger) *hmac256 {
-	logger = _logger
-	h := hmac.New(sha, *(*[]byte)(unsafe.Pointer(&secret)))
-	return &hmac256{
-		h,
+
+	if _logger != nil {
+		logger = _logger
+	} else {
+		logger = ifNotLogger
+	}
+
+	mac := &hmac256{
+		hmac.New(sha, []byte(secret)),
 		*user,
 	}
+
+	return mac
 }
 
 func (h *hmac256) Decode(token string) (*User, error) {
-
 	var i int
 	var indexes = make([]int, 2, 2)
 
@@ -75,7 +96,7 @@ func (h *hmac256) Decode(token string) (*User, error) {
 	_signature := _head + _payload
 	_hasSignature := token[indexes[1]+1:]
 
-	if ok, _ := h.Valid(*(*[]byte)(unsafe.Pointer(&_signature)), *(*[]byte)(unsafe.Pointer(&_hasSignature))); !ok {
+	if ok, _ := h.Valid([]byte(_signature), []byte(_hasSignature)); !ok {
 		logger.Println(invalidSignature.Error())
 		return nil, invalidSignature
 	}
@@ -95,18 +116,10 @@ func (h *hmac256) Decode(token string) (*User, error) {
 		logger.Println(tokenExpired.Error())
 		return nil, tokenExpired
 	}
-
 	return &h.User, nil
 }
 
-func (h *hmac256) Encode() string {
-
-	_head, _err := json.Marshal(Head)
-
-	if _err != nil {
-		logger.Println(_err.Error())
-		return ""
-	}
+func (h *hmac256) Encode() (string, error) {
 
 	exp := time.Now().Add(h.User.Expired * time.Minute).Unix()
 	h.User.Expired = time.Duration(exp)
@@ -114,19 +127,21 @@ func (h *hmac256) Encode() string {
 
 	if _err != nil {
 		logger.Println(_err.Error())
-		return ""
+		return "", _err
 	}
 
-	_stringHead := base64.StdEncoding.EncodeToString(_head)
+	_stringHead := base64.StdEncoding.EncodeToString(Head.HeadString)
+
 	_stringPayload := base64.StdEncoding.EncodeToString(_payload)
 	_signature := _stringHead + _stringPayload
 
-	sum := h.Sum(*(*[]byte)(unsafe.Pointer(&_signature)))
-	bb := base64.StdEncoding.EncodeToString(sum)
-	return _stringHead + "." + _stringPayload + "." + bb
+	sum := h.Sum([]byte(_signature))
+	readySignature := base64.StdEncoding.EncodeToString(sum)
+
+	return _stringHead + "." + _stringPayload + "." + readySignature, nil
 }
 
 func (h *hmac256) Valid(message, messageMAC []byte) (bool, error) {
-	result, err := base64.StdEncoding.DecodeString(*(*string)(unsafe.Pointer(&messageMAC)))
+	result, err := base64.StdEncoding.DecodeString(string(messageMAC))
 	return hmac.Equal(h.Sum(message), result), err
 }
